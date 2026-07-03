@@ -1,0 +1,66 @@
+[build-system]
+requires = ["setuptools>=61.0"]
+build-backend = "setuptools.build_meta"
+
+[project]
+name = "pyintent"
+version = "0.1.0"
+description = "Verify that implementations satisfy intent specifications. A pure verifier for AI-generated Python code — it checks, it never generates."
+readme = "README.md"
+requires-python = ">=3.10"
+license = { text = "MIT" }
+authors = [{ name = "pyintent contributors" }]
+keywords = ["verification", "specification", "ai", "codegen", "contracts", "testing"]
+classifiers = [
+    "Development Status :: 3 - Alpha",
+    "Intended Audience :: Developers",
+    "License :: OSI Approved :: MIT License",
+    "Programming Language :: Python :: 3",
+    "Programming Language :: Python :: 3.10",
+    "Programming Language :: Python :: 3.11",
+    "Programming Language :: Python :: 3.12",
+    "Topic :: Software Development :: Testing",
+    "Topic :: Software Development :: Quality Assurance",
+]
+dependencies = [
+    "click>=8.0",
+    "hypothesis>=6.0",
+    "pytest>=7.0",
+]
+
+[project.optional-dependencies]
+types = ["mypy>=1.0"]
+async = ["pytest-asyncio>=0.21"]
+dev = ["mypy>=1.0", "pytest-asyncio>=0.21"]
+# Evaluation harness (separate from the library; pyintent itself stays lean and
+# never calls an LLM). Install with: pip install -e ".[evals]"
+evals = ["openai>=1.40"]
+
+[project.urls]
+Homepage = "https://github.com/cshaley/pyintent"
+Repository = "https://github.com/cshaley/pyintent"
+"Bug Tracker" = "https://github.com/cshaley/pyintent/issues"
+Changelog = "https://github.com/cshaley/pyintent/blob/main/CHANGELOG.md"
+
+[project.scripts]
+pyintent = "pyintent.cli:main"
+
+[project.entry-points.pytest11]
+pyintent = "pyintent.plugin"
+
+[tool.setuptools.packages.find]
+where = ["."]
+include = ["pyintent*"]
+exclude = ["evals*", "paper*", "results*", "tests*"]
+
+[tool.setuptools.package-data]
+pyintent = ["py.typed"]
+
+[tool.pyintent]
+# Default configuration. Override in your own pyproject.toml.
+# require_specs = false        # or true / "all"
+# exclude = ["tests", "migrations"]
+
+[tool.pytest.ini_options]
+testpaths = ["tests"]
+filterwarnings = ["ignore::DeprecationWarning"]
