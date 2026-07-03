@@ -271,6 +271,60 @@ def bad(x: int) -> int:
     assert verify_effects(target_for(mod, "bad"))[0].status is Status.FAIL
 
 
+def test_effects_throws_ignores_raised_variables(make_module, target_for):
+    """`raise err` where err is a local variable is not statically resolvable
+    and must not be reported as an undeclared raise."""
+    mod = make_module(
+        """
+from pyintent import spec, throws
+@spec(intent="raise via variable", effects=[throws(ValueError)])
+def f(x: int) -> int:
+    err = ValueError("bad")
+    if x < 0:
+        raise err
+    return x
+"""
+    )
+    assert verify_effects(target_for(mod, "f"))[0].status is Status.PASS
+
+
+def test_effects_throws_resolves_module_level_exceptions(make_module, target_for):
+    """A bare name that resolves to an exception class in the module is checked."""
+    mod = make_module(
+        """
+from pyintent import spec, throws
+
+class AppError(Exception):
+    pass
+
+@spec(intent="undeclared custom raise", effects=[throws(ValueError)])
+def f(x: int) -> int:
+    raise AppError("nope")
+"""
+    )
+    res = verify_effects(target_for(mod, "f"))
+    assert res[0].status is Status.FAIL
+    assert "AppError" in res[0].detail
+
+
+def test_effects_line_numbers_are_file_relative(make_module, target_for):
+    mod = make_module(
+        """
+# padding line 2
+# padding line 3
+from pyintent import spec, pure
+
+@spec(intent="dirty", effects=[pure])
+def dirty(x: int) -> int:
+    print(x)
+    return x
+"""
+    )
+    res = verify_effects(target_for(mod, "dirty"))
+    assert res[0].status is Status.FAIL
+    assert "line 8:" in res[0].detail  # print(x) sits on line 8 of the file
+
+
 # --------------------------------------------------------------------------- #
 # types (mypy) — skipped gracefully if mypy is absent
 # --------------------------------------------------------------------------- #
@@ -345,6 +399,41 @@ def test_cli_check_require_specs(tmp_path):
     assert clean.exit_code == 0
     strict = runner.invoke(main, ["check", "--require-specs", str(src)])
     assert strict.exit_code == 1 and "unspecced" in strict.output
+
+
+def test_cli_check_require_specs_skips_private(tmp_path):
+    """--require-specs only demands specs on public names."""
+    src = tmp_path / "m.py"
+    src.write_text(
+        "from pyintent import spec, pure\n"
+        "@spec(intent='id', effects=[pure], ex=['(1,) -> 1'])\n"
+        "def f(x: int) -> int:\n    return x\n"
+        "def _helper(y):\n    return y\n"
+    )
+    runner = CliRunner()
+    strict = runner.invoke(main, ["check", "--require-specs", str(src)])
+    assert strict.exit_code == 0
+    assert "_helper" not in strict.output
+
+
+def test_cli_exclude_config_skips_files(tmp_path):
+    """[tool.pyintent] exclude keeps matching files from being imported at all."""
+    (tmp_path / "pyproject.toml").write_text(
+        "[tool.pyintent]\nexclude = ['migrations']\n"
+    )
+    (tmp_path / "app.py").write_text(
+        "from pyintent import spec, pure\n"
+        "@spec(intent='id', effects=[pure], ex=['(1,) -> 1'])\n"
+        "def f(x: int) -> int:\n    return x\n"
+    )
+    mig = tmp_path / "migrations"
+    mig.mkdir()
+    (mig / "m001.py").write_text("raise RuntimeError('must never be imported')\n")
+
+    runner = CliRunner()
+    result = runner.invoke(main, ["verify", "--only", "examples", str(tmp_path)])
+    assert result.exit_code == 0
+    assert "must never be imported" not in result.output
 
 
 # --------------------------------------------------------------------------- #

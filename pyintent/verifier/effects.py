@@ -4,7 +4,9 @@ In v0.1 three effects are checked:
 
 * ``pure``    — no calls into known impure modules/builtins, no global/nonlocal writes
 * ``async_``  — the function really is a coroutine
-* ``throws``  — every explicitly raised exception type is declared
+* ``throws``  — every explicitly raised exception type is declared. Bare names
+  that don't resolve to an exception class (e.g. ``raise err`` where ``err`` is
+  a local variable) are skipped rather than reported as false positives.
 
 All other effects are recorded as declaration-only. The purity check is
 intentionally shallow (it does not follow calls into helpers) and reports the
@@ -14,8 +16,10 @@ specific offending lines.
 from __future__ import annotations
 
 import ast
+import builtins
 import inspect
 import textwrap
+from typing import Any, Mapping
 
 from .._effects import EffectKind
 from .._discovery import SpecTarget
@@ -59,38 +63,39 @@ class _PurityVisitor(ast.NodeVisitor):
 
 class _RaiseCollector(ast.NodeVisitor):
     def __init__(self) -> None:
-        self.raised: list[tuple[int, str]] = []
+        #: (lineno, name, is_bare_name) — is_bare_name means the raised thing
+        #: was a plain identifier, which may be a variable rather than a class.
+        self.raised: list[tuple[int, str, bool]] = []
 
     def visit_Raise(self, node: ast.Raise) -> None:
         exc = node.exc
         if exc is None:  # bare re-raise
             return
         target = exc.func if isinstance(exc, ast.Call) else exc
-        name = None
         if isinstance(target, ast.Name):
-            name = target.id
+            self.raised.append((node.lineno, target.id, True))
         elif isinstance(target, ast.Attribute):
-            name = target.attr
-        if name:
-            self.raised.append((node.lineno, name))
+            self.raised.append((node.lineno, target.attr, False))
         self.generic_visit(node)
 
 
-def _get_ast(target: SpecTarget) -> ast.AST | None:
+def _get_ast(target: SpecTarget) -> tuple[ast.AST, int] | None:
+    """Return the function's AST node and its 0-based line offset in the file."""
     fn = target.invoke
     if fn is None:
         return None
     try:
-        src = textwrap.dedent(inspect.getsource(fn))
+        lines, firstline = inspect.getsourcelines(fn)
     except (OSError, TypeError):
         return None
+    src = textwrap.dedent("".join(lines))
     try:
         tree = ast.parse(src)
     except SyntaxError:
         return None
     for node in ast.walk(tree):
         if isinstance(node, (ast.FunctionDef, ast.AsyncFunctionDef)):
-            return node
+            return node, firstline - 1
     return None
 
 
@@ -102,16 +107,18 @@ def verify_effects(target: SpecTarget) -> list[CheckResult]:
         return []
 
     results: list[CheckResult] = []
-    fn_ast = None
+    fn_ast, offset = None, 0
     if kinds & {EffectKind.PURE, EffectKind.THROWS}:
-        fn_ast = _get_ast(target)
+        parsed = _get_ast(target)
+        if parsed is not None:
+            fn_ast, offset = parsed
 
     if EffectKind.PURE in kinds:
-        results.append(_check_pure(name, fn_ast))
+        results.append(_check_pure(name, fn_ast, offset))
     if EffectKind.ASYNC in kinds:
         results.append(_check_async(name, sp.is_async))
     if EffectKind.THROWS in kinds:
-        results.append(_check_throws(name, sp, fn_ast))
+        results.append(_check_throws(name, sp, fn_ast, offset, target.globalns))
 
     declared_only = kinds - {EffectKind.PURE, EffectKind.ASYNC, EffectKind.THROWS}
     if declared_only:
@@ -123,15 +130,16 @@ def verify_effects(target: SpecTarget) -> list[CheckResult]:
     return results
 
 
-def _check_pure(name: str, fn_ast) -> CheckResult:
+def _check_pure(name: str, fn_ast, offset: int) -> CheckResult:
     if fn_ast is None:
         return CheckResult("effects", name, Status.SKIPPED,
                            summary="could not read source for purity check", label="pure")
     v = _PurityVisitor()
     v.visit(fn_ast)
     if not v.violations:
-        return CheckResult("effects", name, Status.PASS, summary="pure", label="pure")
-    lines = "\n".join(f"  line {ln}: {what}" for ln, what in v.violations)
+        return CheckResult("effects", name, Status.PASS,
+                           summary="no impure calls found", label="pure")
+    lines = "\n".join(f"  line {ln + offset}: {what}" for ln, what in v.violations)
     detail = f"{name} is declared pure but performs side effects:\n{lines}"
     return CheckResult("effects", name, Status.FAIL,
                        summary=f"declared pure but has {len(v.violations)} side effect(s)",
@@ -140,26 +148,44 @@ def _check_pure(name: str, fn_ast) -> CheckResult:
 
 def _check_async(name: str, is_async: bool) -> CheckResult:
     if is_async:
-        return CheckResult("effects", name, Status.PASS, summary="async", label="async")
+        return CheckResult("effects", name, Status.PASS,
+                           summary="defined with async def", label="async")
     return CheckResult("effects", name, Status.FAIL,
                        summary="declared async_ but is not a coroutine function",
                        detail=f"{name} declares async_ but was not defined with 'async def'.",
                        label="async")
 
 
-def _check_throws(name: str, sp, fn_ast) -> CheckResult:
+def _is_statically_raisable(nm: str, globalns: Mapping[str, Any]) -> bool:
+    """True when a bare raised name resolves to an exception class.
+
+    ``raise err`` where ``err`` is a local variable (or a factory-function
+    call) cannot be resolved statically, so it is not reported — the check
+    only flags names we can prove are exception classes.
+    """
+    obj = globalns.get(nm, getattr(builtins, nm, None))
+    return isinstance(obj, type) and issubclass(obj, BaseException)
+
+
+def _check_throws(name: str, sp, fn_ast, offset: int, globalns: Mapping[str, Any]) -> CheckResult:
     if fn_ast is None:
         return CheckResult("effects", name, Status.SKIPPED,
                            summary="could not read source for throws check", label="throws")
     declared = {e.__name__ for e in sp.thrown_exceptions}
     c = _RaiseCollector()
     c.visit(fn_ast)
-    undeclared = [(ln, nm) for ln, nm in c.raised if nm not in declared]
+    undeclared = [
+        (ln, nm)
+        for ln, nm, is_bare in c.raised
+        if nm not in declared and (not is_bare or _is_statically_raisable(nm, globalns))
+    ]
     if not undeclared:
         return CheckResult("effects", name, Status.PASS,
                            summary=f"raises only declared: {', '.join(sorted(declared))}",
                            label="throws")
-    lines = "\n".join(f"  line {ln}: raises {nm} (not in throws(...))" for ln, nm in undeclared)
+    lines = "\n".join(
+        f"  line {ln + offset}: raises {nm} (not in throws(...))" for ln, nm in undeclared
+    )
     detail = (
         f"{name} raises exception types not declared in throws(...):\n{lines}\n"
         f"  declared: {', '.join(sorted(declared)) or '(none)'}"

@@ -7,6 +7,7 @@ skipped (not failed), so mypy stays an optional dependency.
 from __future__ import annotations
 
 import importlib.util
+import os
 import subprocess
 import sys
 
@@ -23,7 +24,11 @@ def _mypy_available() -> bool:
 
 
 def verify_types(filename: str) -> list[CheckResult]:
-    target = filename
+    try:
+        rel = os.path.relpath(filename)
+        target = rel if len(rel) < len(filename) else filename
+    except ValueError:  # pragma: no cover - different drive on Windows
+        target = filename
     if not _mypy_available():
         return [CheckResult("types", target, Status.SKIPPED,
                             summary="mypy not installed (pip install pyintent[types])")]

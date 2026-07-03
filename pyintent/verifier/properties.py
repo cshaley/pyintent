@@ -14,11 +14,11 @@ import types
 import typing
 from typing import Any, get_args, get_origin
 
-_BUILTINS_DICT = vars(_builtins)
-
 from hypothesis import HealthCheck, given, settings
 from hypothesis import strategies as st
 from hypothesis.errors import UnsatisfiedAssumption
+
+_BUILTINS_DICT = vars(_builtins)
 
 from .._spec import SpecLevel
 from .._discovery import SpecTarget

@@ -4,7 +4,8 @@ Commands
 --------
 * ``pyintent init``                 write the agent guide into prompt files
 * ``pyintent prompt``               print the agent guide to stdout
-* ``pyintent check  PATH``          validate spec structure (imports modules)
+* ``pyintent check  PATH``          validate spec structure (imports modules,
+  which runs top-level code, but never calls the spec'd functions)
 * ``pyintent verify PATH [--json]`` run the verifiers
 
 Exit codes: ``0`` all good, ``1`` verification/spec failures, ``2`` usage or
@@ -13,6 +14,7 @@ load error (could not import a target, malformed spec at import time).
 
 from __future__ import annotations
 
+import fnmatch
 import json
 import sys
 from pathlib import Path
@@ -41,8 +43,11 @@ _STATUS_STYLE = {
 def _load_config(start: Path) -> dict:
     try:
         import tomllib
-    except ModuleNotFoundError:  # pragma: no cover - py<3.11
-        return {}
+    except ModuleNotFoundError:  # pragma: no cover - py3.10
+        try:
+            import tomli as tomllib  # type: ignore[no-redef,import-not-found]
+        except ModuleNotFoundError:
+            return {}
     for directory in [start, *start.parents]:
         cfg = directory / "pyproject.toml"
         if cfg.is_file():
@@ -54,11 +59,35 @@ def _load_config(start: Path) -> dict:
     return {}
 
 
-def _collect_modules(path: Path):
+def _config_exclude(cfg: dict) -> list[str]:
+    raw = cfg.get("exclude") or []
+    if not isinstance(raw, (list, tuple)):
+        return []
+    return [p for p in raw if isinstance(p, str) and p.strip()]
+
+
+def _is_excluded(f: Path, root: Path, patterns: list[str]) -> bool:
+    """True if ``f`` matches any exclude pattern (by path part or relative path)."""
+    try:
+        rel = f.resolve().relative_to(root.resolve())
+    except ValueError:
+        rel = f
+    for pat in patterns:
+        if fnmatch.fnmatch(rel.as_posix(), pat):
+            return True
+        if any(fnmatch.fnmatch(part, pat) for part in rel.parts):
+            return True
+    return False
+
+
+def _collect_modules(path: Path, exclude: list[str] | None = None):
     """Import every target file under ``path``. Returns (modules, load_errors)."""
     modules = []
     errors: list[tuple[Path, BaseException]] = []
+    root = path if path.is_dir() else path.parent
     for f in iter_python_files(path):
+        if exclude and _is_excluded(f, root, exclude):
+            continue
         try:
             modules.append((f, import_file(f)))
         except PyIntentSpecError as e:
@@ -123,6 +152,11 @@ def prompt() -> None:
     click.echo(_prompt.get_reference())
 
 
+def _is_public(qualname: str) -> bool:
+    """Public means no ``_``-prefixed segment anywhere in the dotted name."""
+    return not any(part.startswith("_") for part in qualname.split("."))
+
+
 def _iter_specs(module):
     """Yield (level, qualified_name, spec_or_None) for top-level defs in module."""
     import inspect
@@ -154,7 +188,7 @@ def _iter_specs(module):
 @click.option("--all", "require_all", is_flag=True, default=False,
               help="With --require-specs, also require class and module specs.")
 def check(path: str, require_specs: bool, require_all: bool) -> None:
-    """Validate spec structure by importing PATH (no execution)."""
+    """Validate spec structure by importing PATH (functions are not called)."""
     target = Path(path)
     cfg = _load_config(target if target.is_dir() else target.parent)
     cfg_rs = cfg.get("require_specs")
@@ -164,7 +198,7 @@ def check(path: str, require_specs: bool, require_all: bool) -> None:
 
     level = "all" if (require_specs and require_all) else ("public" if require_specs else None)
 
-    modules, errors = _collect_modules(target)
+    modules, errors = _collect_modules(target, exclude=_config_exclude(cfg))
 
     if errors:
         for f, e in errors:
@@ -180,6 +214,8 @@ def check(path: str, require_specs: bool, require_all: bool) -> None:
                 spec_count += 1
             elif level:
                 if lvl is SpecLevel.CLASS and level != "all":
+                    continue
+                if not _is_public(qual):
                     continue
                 missing.append(f"{f}::{qual} ({lvl.value})")
         if level == "all" and getattr(module, MODULE_ATTR, None) is None:
@@ -203,8 +239,9 @@ def verify(path: str, as_json: bool, only: tuple[str, ...]) -> None:
     """Run pyintent verifiers over PATH and report pass/fail."""
     target = Path(path)
     which = set(only) if only else None
+    cfg = _load_config(target if target.is_dir() else target.parent)
 
-    modules, errors = _collect_modules(target)
+    modules, errors = _collect_modules(target, exclude=_config_exclude(cfg))
     if errors:
         if as_json:
             click.echo(json.dumps({

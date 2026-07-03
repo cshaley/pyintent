@@ -7,7 +7,25 @@ pyintent uses [Semantic Versioning](https://semver.org/).
 
 ---
 
-## [0.1.0] — 2024-07-02
+## [Unreleased]
+
+### Fixed
+
+- `[tool.pyintent] exclude` was documented but never applied; `check` and
+  `verify` now skip excluded files (matched by glob against path segments and
+  the path relative to the target directory).
+- `check --require-specs` no longer flags `_`-prefixed (private) functions and
+  methods, matching the documented "every public function" behaviour.
+- Effects-verifier failure details now report line numbers relative to the
+  file instead of the function's source snippet.
+- `throws(...)` no longer reports a false positive for `raise err` where
+  `err` is a variable; bare raised names are only checked when they resolve
+  to an exception class in the module or builtins.
+- Config loading works on Python 3.10 (falls back to `tomli`, now a
+  dependency on 3.10 only).
+- Effects PASS lines no longer print the label twice (`pure  pure`).
+
+## [0.1.0] — 2026-07-03
 
 Initial open-source release.
 
