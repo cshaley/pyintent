@@ -1,6 +1,6 @@
 # Contributing to pyintent
 
-Thank you for your interest in contributing! Here is everything you need to get started.
+Thanks for helping out. Here's what you need to get started.
 
 ## Filing issues
 
@@ -13,7 +13,7 @@ Thank you for your interest in contributing! Here is everything you need to get 
 ## Development setup
 
 ```bash
-git clone https://github.com/pyintent/pyintent
+git clone https://github.com/cshaley/pyintent
 cd pyintent
 pip install -e ".[dev]"
 ```

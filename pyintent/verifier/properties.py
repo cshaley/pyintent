@@ -14,8 +14,6 @@ import types
 import typing
 from typing import Any, get_args, get_origin
 
-_BUILTINS_DICT = vars(_builtins)
-
 from hypothesis import HealthCheck, given, settings
 from hypothesis import strategies as st
 from hypothesis.errors import UnsatisfiedAssumption
@@ -23,6 +21,8 @@ from hypothesis.errors import UnsatisfiedAssumption
 from .._spec import SpecLevel
 from .._discovery import SpecTarget
 from ._result import CheckResult, Status
+
+_BUILTINS_DICT = vars(_builtins)
 
 _RUNNABLE = {SpecLevel.FUNCTION, SpecLevel.STATICMETHOD, SpecLevel.CLASSMETHOD}
 _MAX_EXAMPLES = 50
