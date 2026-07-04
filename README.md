@@ -31,9 +31,21 @@ pyintent is a pure verifier. It never calls an LLM. Like mypy checks types witho
 
 I started with a different question: would LLMs write better code if we gave them a language designed for them? I prototyped one with Replit agents. The answer was no. A model that has never seen a language in its training data writes it badly, no matter how friendly the syntax is, and no amount of prompt-side documentation made up the gap. The training data wins.
 
-But the research I read while designing that language kept pointing at a handful of things that reliably do help LLMs produce correct code: stating intent explicitly, giving concrete input/output examples, declaring side effects, and giving the model fast deterministic feedback it can iterate against.
+But the research I read while designing that language kept pointing at a handful of things that reliably do help LLMs produce correct code: stating intent explicitly, giving concrete input/output examples, declaring side effects, and giving the model fast deterministic feedback it can iterate against. (The specific papers are in [The research behind the design](#the-research-behind-the-design).)
 
 So pyintent is that language idea inverted. Instead of new syntax the model has never seen, it's a contract you attach to ordinary Python — the language LLMs know best — plus a verifier that checks the contract mechanically. The spec states what the code should do; the AI writes the code; `pyintent verify` closes the loop.
+
+## The research behind the design
+
+Each piece of `@spec` maps to a finding from the code-generation literature. These are the papers that shaped the design:
+
+**Why not a new language.** Code LLM quality tracks how often a language appears in training data. [MultiPL-E](https://arxiv.org/abs/2208.08227) (Cassano et al.) benchmarked code generation across 19 languages and found performance drops off sharply for low-resource ones; [MultiPL-T](https://arxiv.org/abs/2308.09895) (Cassano et al.) showed that closing that gap takes large-scale synthetic training data — not something you can do from the prompt side. A brand-new language is the lowest-resource language possible, which is why pyintent attaches contracts to Python instead.
+
+**Why examples are the core of the spec.** [TiCoder](https://arxiv.org/abs/2208.05950) (Lahiri et al.) showed that formalizing user intent as a handful of concrete test cases both clarifies what the user actually wants and substantially improves the accuracy of the code suggestions that survive them. pyintent's `ex` field is that idea as a one-line syntax: each example is a runnable check the implementation must pass.
+
+**Why postconditions.** [Endres et al.](https://arxiv.org/abs/2310.01831) found that natural-language intent can be translated into formal postconditions that are usually correct and genuinely discriminating — their generated postconditions caught 64 real historical bugs in Defects4J. `ensures` is the hand-written version of the same contract, and pyintent checks it with property-based testing. On that front, [Vikram et al.](https://arxiv.org/abs/2307.04346) note that the painful parts of property-based testing are writing input generators and inventing properties; pyintent generates inputs from your type hints so the spec author only writes the properties.
+
+**Why a deterministic verifier in the loop.** Models improve markedly when they can iterate against real execution feedback ([Self-Debugging](https://arxiv.org/abs/2304.05128), Chen et al.), and generated tests are strong enough signal to pick correct solutions out of a candidate pool ([CodeT](https://arxiv.org/abs/2207.10397), Chen et al.). But [Olausson et al.](https://arxiv.org/abs/2306.09896) found self-repair is bottlenecked by the model's ability to judge its *own* code — models grade themselves poorly. That's the argument for pyintent being a pure verifier: the feedback comes from running the contract, not from asking the model whether it thinks it's right.
 
 ## What I can and can't claim
 
@@ -49,6 +61,12 @@ That's a hypothesis, not a measured result. If you have an idea for a fair exper
 pip install pyintent           # core (examples, properties, effects)
 pip install pyintent[types]    # + mypy integration
 pip install pyintent[dev]      # + mypy + pytest-asyncio
+```
+
+Or with conda:
+
+```bash
+conda install -c conda-forge pyintent
 ```
 
 ## Quick start
