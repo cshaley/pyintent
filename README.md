@@ -145,7 +145,7 @@ Three effects are actively verified in v0.1:
 |--------|----------------|
 | `pure` | No calls to impure builtins (`print`, `open`, …) or modules (`os`, `sys`, `random`, `requests`, …), no `global`/`nonlocal` writes. |
 | `async_` | The function must be defined with `async def`. |
-| `throws(ExcA, ExcB)` | Every explicitly raised exception type is declared. Raises through variables (`raise err`) are skipped, since they can't be resolved statically. |
+| `throws(ExcA, ExcB)` | Every explicitly raised exception type is declared. Raises that don't statically name a type — `raise err` through a variable, `raise make_err()` through a factory — are skipped and counted in the summary. |
 
 These effects are declaration-only (recorded but not verified):
 `reads("db")`, `writes("cache")`, `network("stripe")`, `io`
@@ -218,7 +218,7 @@ require_specs = true   # or "all" to also require class/module specs
 exclude = ["migrations", "tests"]
 ```
 
-`exclude` entries are matched (with glob patterns) against each file's path segments and its path relative to the target directory. Excluded files are never imported.
+`exclude` entries are glob patterns matched against path segments (`"migrations"`), relative-path prefixes (`"src/migrations"`), or filenames (`"*_pb2.py"`), anchored at the directory containing the pyproject.toml. Both the CLI and `pytest --pyintent` skip excluded files without importing them. A file you name explicitly on the command line is always checked, even if a pattern matches it.
 
 ## Safety
 

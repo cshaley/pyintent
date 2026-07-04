@@ -66,8 +66,8 @@ it only attaches metadata, so it never changes runtime behaviour.
   `nonlocal` writes. (Shallow: it does not follow calls into helpers.)
 - `async_` — **verified**: the function must be `async def`.
 - `throws(ExcA, ExcB)` — **verified** by AST: every exception type you `raise`
-  explicitly must be declared here. (`raise err` through a variable is not
-  statically resolvable and is skipped.)
+  explicitly must be declared here. (Raises that don't statically name a type,
+  like `raise err` through a variable, are skipped and counted in the summary.)
 - `reads(...)`, `writes(...)`, `network(...)`, `io` — recorded as documentation
   in v0.1 (declaration-only, not yet enforced).
 

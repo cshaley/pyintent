@@ -25,6 +25,7 @@ from pathlib import Path
 
 import pytest
 
+from ._config import exclude_patterns, is_excluded, load_config
 from ._discovery import discover_in_module
 from ._loader import import_file
 from .verifier._result import Status
@@ -58,6 +59,18 @@ def _pkg_dir() -> str:
     return os.path.dirname(os.path.abspath(__file__))
 
 
+def _excluded_by_config(file_path: Path, config) -> bool:
+    """True if [tool.pyintent] exclude covers this file (cached per session)."""
+    cached = getattr(config, "_pyintent_exclude", None)
+    if cached is None:
+        start = Path(str(config.rootpath))
+        cfg, cfg_dir = load_config(start)
+        cached = ((cfg_dir or start).resolve(), exclude_patterns(cfg))
+        config._pyintent_exclude = cached
+    root, patterns = cached
+    return is_excluded(file_path, root, patterns)
+
+
 def _looks_like_specs(path: Path) -> bool:
     try:
         text = path.read_text(encoding="utf-8")
@@ -82,6 +95,9 @@ def pytest_collect_file(file_path: Path, parent):  # type: ignore[override]
     # Leave files matching pytest's own python_files patterns to pytest.
     patterns = parent.config.getini("python_files") or ["test_*.py", "*_test.py"]
     if any(fnmatch.fnmatch(file_path.name, pat) for pat in patterns):
+        return None
+
+    if _excluded_by_config(file_path, parent.config):
         return None
 
     if not _looks_like_specs(file_path):

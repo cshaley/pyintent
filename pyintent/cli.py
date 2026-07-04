@@ -14,13 +14,14 @@ load error (could not import a target, malformed spec at import time).
 
 from __future__ import annotations
 
-import fnmatch
 import json
+import os
 import sys
 from pathlib import Path
 
 import click
 
+from ._config import exclude_patterns, is_excluded, load_config
 from ._errors import PyIntentSpecError
 from ._loader import import_file, iter_python_files
 from ._module_spec import MODULE_ATTR
@@ -40,53 +41,31 @@ _STATUS_STYLE = {
 # --------------------------------------------------------------------------- #
 # config
 # --------------------------------------------------------------------------- #
-def _load_config(start: Path) -> dict:
-    try:
-        import tomllib
-    except ModuleNotFoundError:  # pragma: no cover - py3.10
-        try:
-            import tomli as tomllib  # type: ignore[no-redef,import-not-found]
-        except ModuleNotFoundError:
-            return {}
-    for directory in [start, *start.parents]:
-        cfg = directory / "pyproject.toml"
-        if cfg.is_file():
-            try:
-                data = tomllib.loads(cfg.read_text(encoding="utf-8"))
-            except Exception:
-                return {}
-            return data.get("tool", {}).get("pyintent", {}) or {}
-    return {}
+def _project_config(target: Path) -> tuple[dict, Path]:
+    """Load [tool.pyintent] for ``target``; return (config, exclude root).
+
+    Exclude patterns are anchored at the directory of the pyproject.toml that
+    defined them, so they mean the same thing no matter which subdirectory
+    the command is pointed at.
+    """
+    start = target if target.is_dir() else target.parent
+    cfg, cfg_dir = load_config(start)
+    return cfg, (cfg_dir or start).resolve()
 
 
-def _config_exclude(cfg: dict) -> list[str]:
-    raw = cfg.get("exclude") or []
-    if not isinstance(raw, (list, tuple)):
-        return []
-    return [p for p in raw if isinstance(p, str) and p.strip()]
+def _collect_modules(path: Path, exclude: list[str] | None = None,
+                     exclude_root: Path | None = None):
+    """Import every target file under ``path``. Returns (modules, load_errors).
 
-
-def _is_excluded(f: Path, root: Path, patterns: list[str]) -> bool:
-    """True if ``f`` matches any exclude pattern (by path part or relative path)."""
-    try:
-        rel = f.resolve().relative_to(root.resolve())
-    except ValueError:
-        rel = f
-    for pat in patterns:
-        if fnmatch.fnmatch(rel.as_posix(), pat):
-            return True
-        if any(fnmatch.fnmatch(part, pat) for part in rel.parts):
-            return True
-    return False
-
-
-def _collect_modules(path: Path, exclude: list[str] | None = None):
-    """Import every target file under ``path``. Returns (modules, load_errors)."""
+    ``exclude`` only applies when walking a directory — a file the user names
+    explicitly is always checked.
+    """
     modules = []
     errors: list[tuple[Path, BaseException]] = []
-    root = path if path.is_dir() else path.parent
+    if not (exclude and path.is_dir() and exclude_root is not None):
+        exclude = None
     for f in iter_python_files(path):
-        if exclude and _is_excluded(f, root, exclude):
+        if exclude and exclude_root is not None and is_excluded(f, exclude_root, exclude):
             continue
         try:
             modules.append((f, import_file(f)))
@@ -100,13 +79,24 @@ def _collect_modules(path: Path, exclude: list[str] | None = None):
 # --------------------------------------------------------------------------- #
 # reporting
 # --------------------------------------------------------------------------- #
+def _display_target(target: str) -> str:
+    """Shorten absolute paths for terminal display (results keep them intact)."""
+    if not os.path.isabs(target):
+        return target
+    try:
+        rel = os.path.relpath(target)
+    except ValueError:  # pragma: no cover - different drive on Windows
+        return target
+    return rel if not rel.startswith(os.pardir) else target
+
+
 def _print_results(results, *, show_detail=True) -> dict[Status, int]:
     counts: dict[Status, int] = {s: 0 for s in Status}
     for r in results:
         counts[r.status] += 1
         label, color = _STATUS_STYLE[r.status]
         tag = click.style(f"[{label}]", fg=color, bold=True)
-        loc = click.style(r.target, bold=True)
+        loc = click.style(_display_target(r.target), bold=True)
         extra = f"  {r.label}" if r.label else ""
         summ = f"  {r.summary}" if r.summary else ""
         click.echo(f"{tag} {r.verifier:<10} {loc}{extra}{summ}")
@@ -190,7 +180,7 @@ def _iter_specs(module):
 def check(path: str, require_specs: bool, require_all: bool) -> None:
     """Validate spec structure by importing PATH (functions are not called)."""
     target = Path(path)
-    cfg = _load_config(target if target.is_dir() else target.parent)
+    cfg, exclude_root = _project_config(target)
     cfg_rs = cfg.get("require_specs")
     if not require_specs and cfg_rs:
         require_specs = True
@@ -198,7 +188,8 @@ def check(path: str, require_specs: bool, require_all: bool) -> None:
 
     level = "all" if (require_specs and require_all) else ("public" if require_specs else None)
 
-    modules, errors = _collect_modules(target, exclude=_config_exclude(cfg))
+    modules, errors = _collect_modules(target, exclude=exclude_patterns(cfg),
+                                       exclude_root=exclude_root)
 
     if errors:
         for f, e in errors:
@@ -239,9 +230,10 @@ def verify(path: str, as_json: bool, only: tuple[str, ...]) -> None:
     """Run pyintent verifiers over PATH and report pass/fail."""
     target = Path(path)
     which = set(only) if only else None
-    cfg = _load_config(target if target.is_dir() else target.parent)
+    cfg, exclude_root = _project_config(target)
 
-    modules, errors = _collect_modules(target, exclude=_config_exclude(cfg))
+    modules, errors = _collect_modules(target, exclude=exclude_patterns(cfg),
+                                       exclude_root=exclude_root)
     if errors:
         if as_json:
             click.echo(json.dumps({
