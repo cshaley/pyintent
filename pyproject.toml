@@ -4,7 +4,7 @@ build-backend = "setuptools.build_meta"
 
 [project]
 name = "pyintent"
-version = "0.1.0"
+version = "0.1.1"
 description = "Verify that implementations satisfy intent specifications. A pure verifier for AI-generated Python code — it checks, it never generates."
 readme = "README.md"
 requires-python = ">=3.10"
