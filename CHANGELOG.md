@@ -7,6 +7,15 @@ pyintent uses [Semantic Versioning](https://semver.org/).
 
 ---
 
+## [0.1.2] — 2026-07-05
+
+### Changed
+
+- Rewrote the project description and README opening in plain language,
+  leading with the problem pyintent solves.
+- Releases now publish to PyPI automatically via GitHub Actions trusted
+  publishing when a `v*` tag is pushed.
+
 ## [0.1.1] — 2026-07-03
 
 ### Fixed

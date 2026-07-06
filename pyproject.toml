@@ -4,7 +4,7 @@ build-backend = "setuptools.build_meta"
 
 [project]
 name = "pyintent"
-version = "0.1.1"
+version = "0.1.2"
 description = "Check that AI-written Python actually does what you asked for. Describe what a function should do; pyintent verifies the code against it. No AI inside, just repeatable checks."
 readme = "README.md"
 requires-python = ">=3.10"
