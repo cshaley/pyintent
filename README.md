@@ -1,6 +1,10 @@
 # pyintent
 
-Write down what a function is supposed to do. Let an AI coding tool write the implementation. pyintent checks that the implementation actually does what you said.
+Check that AI-written Python actually does what you asked for.
+
+**The problem:** AI coding tools write code fast. Then comes the slow part: reading it all to decide whether you trust it. And your description of what you wanted lives in a chat window that's gone tomorrow, so the next time the code gets changed (by a person or another AI), nobody can check it still does what it was for.
+
+**What pyintent does:** you write down what a function is supposed to do, right on the function itself: a one-line description, a few example inputs and outputs, rules the result must follow. The AI writes the code. Then `pyintent verify` runs your description against the code and tells you, pass or fail, whether the code does what you said.
 
 ```python
 from pyintent import spec, reads, throws
@@ -25,7 +29,7 @@ pyintent verify myapp/orders.py     # run all verifiers, human-readable report
 pytest --pyintent                   # or run specs as pytest items
 ```
 
-pyintent is a pure verifier. It never calls an LLM. Like mypy checks types without generating code, pyintent checks that an implementation matches its declared intent: examples, pre/post-conditions, effects, and types. Every check is deterministic: it passes, or it tells you exactly what's wrong and where.
+There is no AI inside pyintent. It runs your checks the way pytest runs tests, so you get the same answer every time: pass, or a precise report of what's wrong and where. Think of it as mypy for intent. mypy checks that your types line up without writing code for you; pyintent does the same for what the code is supposed to *do* (examples, rules about the result, declared side effects, types).
 
 ## Why I built this
 

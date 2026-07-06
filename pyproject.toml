@@ -5,7 +5,7 @@ build-backend = "setuptools.build_meta"
 [project]
 name = "pyintent"
 version = "0.1.1"
-description = "Verify that implementations satisfy intent specifications. A pure verifier for AI-generated Python code — it checks, it never generates."
+description = "Check that AI-written Python actually does what you asked for. Describe what a function should do; pyintent verifies the code against it. No AI inside, just repeatable checks."
 readme = "README.md"
 requires-python = ">=3.10"
 license = { text = "MIT" }
